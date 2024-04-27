@@ -444,8 +444,10 @@ CHROMA_CLIENT = chromadb.PersistentClient(
     path=CHROMA_DATA_PATH,
     settings=Settings(allow_reset=True, anonymized_telemetry=False),
 )
-CHUNK_SIZE = 1500
-CHUNK_OVERLAP = 100
+
+CHUNK_SIZE = os.environ.get("CHUNK_SIZE", 1500)
+
+CHUNK_OVERLAP = os.environ.get("CHUNK_OVERLAP", 100)
 
 
 RAG_TEMPLATE = """Use the following context as your learned knowledge, inside <context></context> XML tags.
