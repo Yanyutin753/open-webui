@@ -2,13 +2,13 @@ import logging
 
 from fastapi import Request, UploadFile, File
 from fastapi import Depends, HTTPException, status
+from fastapi.responses import Response
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 import re
 import uuid
 import csv
-
 
 from apps.webui.models.auths import (
     SigninForm,
@@ -33,7 +33,11 @@ from utils.utils import (
 from utils.misc import parse_duration, validate_email_format
 from utils.webhook import post_webhook
 from constants import ERROR_MESSAGES, WEBHOOK_MESSAGES
-from config import WEBUI_AUTH, WEBUI_AUTH_TRUSTED_EMAIL_HEADER
+from config import (
+    WEBUI_AUTH,
+    WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
+    WEBUI_AUTH_TRUSTED_NAME_HEADER,
+)
 
 router = APIRouter()
 
@@ -43,7 +47,21 @@ router = APIRouter()
 
 
 @router.get("/", response_model=UserResponse)
-async def get_session_user(user=Depends(get_current_user)):
+async def get_session_user(
+    request: Request, response: Response, user=Depends(get_current_user)
+):
+    token = create_token(
+        data={"id": user.id},
+        expires_delta=parse_duration(request.app.state.config.JWT_EXPIRES_IN),
+    )
+
+    # Set the cookie token
+    response.set_cookie(
+        key="token",
+        value=token,
+        httponly=True,  # Ensures the cookie is not accessible via JavaScript
+    )
+
     return {
         "id": user.id,
         "email": user.email,
@@ -104,17 +122,23 @@ async def update_password(
 
 
 @router.post("/signin", response_model=SigninResponse)
-async def signin(request: Request, form_data: SigninForm):
+async def signin(request: Request, response: Response, form_data: SigninForm):
     if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
         if WEBUI_AUTH_TRUSTED_EMAIL_HEADER not in request.headers:
             raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_TRUSTED_HEADER)
 
         trusted_email = request.headers[WEBUI_AUTH_TRUSTED_EMAIL_HEADER].lower()
+        trusted_name = trusted_email
+        if WEBUI_AUTH_TRUSTED_NAME_HEADER:
+            trusted_name = request.headers.get(
+                WEBUI_AUTH_TRUSTED_NAME_HEADER, trusted_email
+            )
         if not Users.get_user_by_email(trusted_email.lower()):
             await signup(
                 request,
+                response,
                 SignupForm(
-                    email=trusted_email, password=str(uuid.uuid4()), name=trusted_email
+                    email=trusted_email, password=str(uuid.uuid4()), name=trusted_name
                 ),
             )
         user = Auths.authenticate_user_by_trusted_header(trusted_email)
@@ -130,6 +154,7 @@ async def signin(request: Request, form_data: SigninForm):
 
             await signup(
                 request,
+                response,
                 SignupForm(email=admin_email, password=admin_password, name="User"),
             )
 
@@ -141,6 +166,13 @@ async def signin(request: Request, form_data: SigninForm):
         token = create_token(
             data={"id": user.id},
             expires_delta=parse_duration(request.app.state.config.JWT_EXPIRES_IN),
+        )
+
+        # Set the cookie token
+        response.set_cookie(
+            key="token",
+            value=token,
+            httponly=True,  # Ensures the cookie is not accessible via JavaScript
         )
 
         return {
@@ -162,7 +194,7 @@ async def signin(request: Request, form_data: SigninForm):
 
 
 @router.post("/signup", response_model=SigninResponse)
-async def signup(request: Request, form_data: SignupForm):
+async def signup(request: Request, response: Response, form_data: SignupForm):
     if not request.app.state.config.ENABLE_SIGNUP and WEBUI_AUTH:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
@@ -197,6 +229,13 @@ async def signup(request: Request, form_data: SignupForm):
                 expires_delta=parse_duration(request.app.state.config.JWT_EXPIRES_IN),
             )
             # response.set_cookie(key='token', value=token, httponly=True)
+
+            # Set the cookie token
+            response.set_cookie(
+                key="token",
+                value=token,
+                httponly=True,  # Ensures the cookie is not accessible via JavaScript
+            )
 
             if request.app.state.config.WEBHOOK_URL:
                 post_webhook(
@@ -270,72 +309,87 @@ async def add_user(form_data: AddUserForm, user=Depends(get_admin_user)):
 
 
 ############################
+# GetAdminDetails
+############################
+
+
+@router.get("/admin/details")
+async def get_admin_details(request: Request, user=Depends(get_current_user)):
+    if request.app.state.config.SHOW_ADMIN_DETAILS:
+        admin_email = request.app.state.config.ADMIN_EMAIL
+        admin_name = None
+
+        print(admin_email, admin_name)
+
+        if admin_email:
+            admin = Users.get_user_by_email(admin_email)
+            if admin:
+                admin_name = admin.name
+        else:
+            admin = Users.get_first_user()
+            if admin:
+                admin_email = admin.email
+                admin_name = admin.name
+
+        return {
+            "name": admin_name,
+            "email": admin_email,
+        }
+    else:
+        raise HTTPException(400, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
+
+
+############################
 # ToggleSignUp
 ############################
 
 
-@router.get("/signup/enabled", response_model=bool)
-async def get_sign_up_status(request: Request, user=Depends(get_admin_user)):
-    return request.app.state.config.ENABLE_SIGNUP
+@router.get("/admin/config")
+async def get_admin_config(request: Request, user=Depends(get_admin_user)):
+    return {
+        "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
+        "ENABLE_SIGNUP": request.app.state.config.ENABLE_SIGNUP,
+        "DEFAULT_USER_ROLE": request.app.state.config.DEFAULT_USER_ROLE,
+        "JWT_EXPIRES_IN": request.app.state.config.JWT_EXPIRES_IN,
+        "ENABLE_COMMUNITY_SHARING": request.app.state.config.ENABLE_COMMUNITY_SHARING,
+    }
 
 
-@router.get("/signup/enabled/toggle", response_model=bool)
-async def toggle_sign_up(request: Request, user=Depends(get_admin_user)):
-    request.app.state.config.ENABLE_SIGNUP = not request.app.state.config.ENABLE_SIGNUP
-    return request.app.state.config.ENABLE_SIGNUP
+class AdminConfig(BaseModel):
+    SHOW_ADMIN_DETAILS: bool
+    ENABLE_SIGNUP: bool
+    DEFAULT_USER_ROLE: str
+    JWT_EXPIRES_IN: str
+    ENABLE_COMMUNITY_SHARING: bool
 
 
-############################
-# Default User Role
-############################
-
-
-@router.get("/signup/user/role")
-async def get_default_user_role(request: Request, user=Depends(get_admin_user)):
-    return request.app.state.config.DEFAULT_USER_ROLE
-
-
-class UpdateRoleForm(BaseModel):
-    role: str
-
-
-@router.post("/signup/user/role")
-async def update_default_user_role(
-    request: Request, form_data: UpdateRoleForm, user=Depends(get_admin_user)
+@router.post("/admin/config")
+async def update_admin_config(
+    request: Request, form_data: AdminConfig, user=Depends(get_admin_user)
 ):
-    if form_data.role in ["pending", "user", "admin"]:
-        request.app.state.config.DEFAULT_USER_ROLE = form_data.role
-    return request.app.state.config.DEFAULT_USER_ROLE
+    request.app.state.config.SHOW_ADMIN_DETAILS = form_data.SHOW_ADMIN_DETAILS
+    request.app.state.config.ENABLE_SIGNUP = form_data.ENABLE_SIGNUP
 
+    if form_data.DEFAULT_USER_ROLE in ["pending", "user", "admin"]:
+        request.app.state.config.DEFAULT_USER_ROLE = form_data.DEFAULT_USER_ROLE
 
-############################
-# JWT Expiration
-############################
-
-
-@router.get("/token/expires")
-async def get_token_expires_duration(request: Request, user=Depends(get_admin_user)):
-    return request.app.state.config.JWT_EXPIRES_IN
-
-
-class UpdateJWTExpiresDurationForm(BaseModel):
-    duration: str
-
-
-@router.post("/token/expires/update")
-async def update_token_expires_duration(
-    request: Request,
-    form_data: UpdateJWTExpiresDurationForm,
-    user=Depends(get_admin_user),
-):
     pattern = r"^(-1|0|(-?\d+(\.\d+)?)(ms|s|m|h|d|w))$"
 
     # Check if the input string matches the pattern
-    if re.match(pattern, form_data.duration):
-        request.app.state.config.JWT_EXPIRES_IN = form_data.duration
-        return request.app.state.config.JWT_EXPIRES_IN
-    else:
-        return request.app.state.config.JWT_EXPIRES_IN
+    if re.match(pattern, form_data.JWT_EXPIRES_IN):
+        request.app.state.config.JWT_EXPIRES_IN = form_data.JWT_EXPIRES_IN
+
+    request.app.state.config.ENABLE_COMMUNITY_SHARING = (
+        form_data.ENABLE_COMMUNITY_SHARING
+    )
+
+    return {
+        "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
+        "ENABLE_SIGNUP": request.app.state.config.ENABLE_SIGNUP,
+        "DEFAULT_USER_ROLE": request.app.state.config.DEFAULT_USER_ROLE,
+        "JWT_EXPIRES_IN": request.app.state.config.JWT_EXPIRES_IN,
+        "ENABLE_COMMUNITY_SHARING": request.app.state.config.ENABLE_COMMUNITY_SHARING,
+    }
 
 
 ############################

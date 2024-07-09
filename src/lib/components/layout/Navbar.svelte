@@ -38,7 +38,7 @@
 </script>
 
 <ShareChatModal bind:show={showShareChatModal} chatId={$chatId} />
-<nav id="nav" class=" sticky py-2.5 top-0 flex flex-row justify-center z-30">
+<nav id="nav" class=" sticky py-2.5 top-0 flex flex-row justify-center z-10">
 	<div class=" flex max-w-full w-full mx-auto px-5 pt-0.5 md:px-[1rem]">
 		<div class="flex items-center w-full max-w-full">
 			<div
@@ -67,7 +67,7 @@
 			<div class="self-start flex flex-none items-center text-gray-600 dark:text-gray-400">
 				<!-- <div class="md:hidden flex self-center w-[1px] h-5 mx-2 bg-gray-300 dark:bg-stone-700" /> -->
 
-				{#if shareEnabled}
+				{#if shareEnabled && chat && chat.id}
 					<Menu
 						{chat}
 						{shareEnabled}

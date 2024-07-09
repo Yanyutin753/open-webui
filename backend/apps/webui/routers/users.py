@@ -19,7 +19,12 @@ from apps.webui.models.users import (
 from apps.webui.models.auths import Auths
 from apps.webui.models.chats import Chats
 
-from utils.utils import get_verified_user, get_password_hash, get_admin_user
+from utils.utils import (
+    get_verified_user,
+    get_password_hash,
+    get_current_user,
+    get_admin_user,
+)
 from constants import ERROR_MESSAGES
 
 from config import SRC_LOG_LEVELS
@@ -103,6 +108,52 @@ async def update_user_settings_by_session_user(
     user = Users.update_user_by_id(user.id, {"settings": form_data.model_dump()})
     if user:
         return user.settings
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.USER_NOT_FOUND,
+        )
+
+
+############################
+# GetUserInfoBySessionUser
+############################
+
+
+@router.get("/user/info", response_model=Optional[dict])
+async def get_user_info_by_session_user(user=Depends(get_verified_user)):
+    user = Users.get_user_by_id(user.id)
+    if user:
+        return user.info
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.USER_NOT_FOUND,
+        )
+
+
+############################
+# UpdateUserInfoBySessionUser
+############################
+
+
+@router.post("/user/info/update", response_model=Optional[dict])
+async def update_user_settings_by_session_user(
+    form_data: dict, user=Depends(get_verified_user)
+):
+    user = Users.get_user_by_id(user.id)
+    if user:
+        if user.info is None:
+            user.info = {}
+
+        user = Users.update_user_by_id(user.id, {"info": {**user.info, **form_data}})
+        if user:
+            return user.info
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.USER_NOT_FOUND,
+            )
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

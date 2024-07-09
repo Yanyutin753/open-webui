@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { marked } from 'marked';
+
 	import tippy from 'tippy.js';
 
 	export let placement = 'top';
@@ -20,6 +22,10 @@
 				allowHTML: true,
 				touch: touch
 			});
+		}
+	} else if (tooltipInstance && content === '') {
+		if (tooltipInstance) {
+			tooltipInstance.destroy();
 		}
 	}
 

@@ -3,7 +3,82 @@ import hashlib
 import json
 import re
 from datetime import timedelta
-from typing import Optional
+from typing import Optional, List, Tuple
+import uuid
+import time
+
+
+def get_last_user_message(messages: List[dict]) -> str:
+    for message in reversed(messages):
+        if message["role"] == "user":
+            if isinstance(message["content"], list):
+                for item in message["content"]:
+                    if item["type"] == "text":
+                        return item["text"]
+            return message["content"]
+    return None
+
+
+def get_last_assistant_message(messages: List[dict]) -> str:
+    for message in reversed(messages):
+        if message["role"] == "assistant":
+            if isinstance(message["content"], list):
+                for item in message["content"]:
+                    if item["type"] == "text":
+                        return item["text"]
+            return message["content"]
+    return None
+
+
+def get_system_message(messages: List[dict]) -> dict:
+    for message in messages:
+        if message["role"] == "system":
+            return message
+    return None
+
+
+def remove_system_message(messages: List[dict]) -> List[dict]:
+    return [message for message in messages if message["role"] != "system"]
+
+
+def pop_system_message(messages: List[dict]) -> Tuple[dict, List[dict]]:
+    return get_system_message(messages), remove_system_message(messages)
+
+
+def add_or_update_system_message(content: str, messages: List[dict]):
+    """
+    Adds a new system message at the beginning of the messages list
+    or updates the existing system message at the beginning.
+
+    :param msg: The message to be added or appended.
+    :param messages: The list of message dictionaries.
+    :return: The updated list of message dictionaries.
+    """
+
+    if messages and messages[0].get("role") == "system":
+        messages[0]["content"] += f"{content}\n{messages[0]['content']}"
+    else:
+        # Insert at the beginning
+        messages.insert(0, {"role": "system", "content": content})
+
+    return messages
+
+
+def stream_message_template(model: str, message: str):
+    return {
+        "id": f"{model}-{str(uuid.uuid4())}",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"content": message},
+                "logprobs": None,
+                "finish_reason": None,
+            }
+        ],
+    }
 
 
 def get_gravatar_url(email):
@@ -123,11 +198,25 @@ def parse_ollama_modelfile(model_text):
         "repeat_penalty": float,
         "temperature": float,
         "seed": int,
-        "stop": str,
         "tfs_z": float,
         "num_predict": int,
         "top_k": int,
         "top_p": float,
+        "num_keep": int,
+        "typical_p": float,
+        "presence_penalty": float,
+        "frequency_penalty": float,
+        "penalize_newline": bool,
+        "numa": bool,
+        "num_batch": int,
+        "num_gpu": int,
+        "main_gpu": int,
+        "low_vram": bool,
+        "f16_kv": bool,
+        "vocab_only": bool,
+        "use_mmap": bool,
+        "use_mlock": bool,
+        "num_thread": int,
     }
 
     data = {"base_model_id": None, "params": {}}
@@ -156,10 +245,18 @@ def parse_ollama_modelfile(model_text):
         param_match = re.search(rf"PARAMETER {param} (.+)", model_text, re.IGNORECASE)
         if param_match:
             value = param_match.group(1)
-            if param_type == int:
-                value = int(value)
-            elif param_type == float:
-                value = float(value)
+
+            try:
+                if param_type == int:
+                    value = int(value)
+                elif param_type == float:
+                    value = float(value)
+                elif param_type == bool:
+                    value = value.lower() == "true"
+            except Exception as e:
+                print(e)
+                continue
+
             data["params"][param] = value
 
     # Parse adapter
@@ -171,8 +268,14 @@ def parse_ollama_modelfile(model_text):
     system_desc_match = re.search(
         r'SYSTEM\s+"""(.+?)"""', model_text, re.DOTALL | re.IGNORECASE
     )
+    system_desc_match_single = re.search(
+        r"SYSTEM\s+([^\n]+)", model_text, re.IGNORECASE
+    )
+
     if system_desc_match:
         data["params"]["system"] = system_desc_match.group(1).strip()
+    elif system_desc_match_single:
+        data["params"]["system"] = system_desc_match_single.group(1).strip()
 
     # Parse messages
     messages = []
