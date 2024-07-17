@@ -119,15 +119,15 @@
 	}
 
 	function escapeBrackets(text: string) {
-		const pattern = /(```[\S\s]*?```|`.*?`)|\\\[([\S\s]*?[^\\])\\]|\\\((.*?)\\\)/g;
-		return text.replaceAll(pattern, (match, codeBlock, squareBracket, roundBracket) => {
+		const pattern = /(```[\s\S]*?```|`.*?`)|\\\[([\s\S]*?[^\\])\\\]|\\\((.*?)\\\)/g;
+		return text.replace(pattern, (match, codeBlock, squareBracket, roundBracket) => {
 			if (codeBlock) {
 				return codeBlock;
-			} else if (squareBracket) {
-				const cleanSquareBracket = squareBracket.replace(/\n/g, ' ');
+			} else if (squareBracket !== undefined) {
+				let cleanSquareBracket = squareBracket.replace(/\n/g, '\\ ');
 				return `$$${cleanSquareBracket}$$`;
-			} else if (roundBracket) {
-				const cleanRoundBracket = roundBracket.replace(/\n/g, ' ');
+			} else if (roundBracket !== undefined) {
+				let cleanRoundBracket = roundBracket.replace(/\n/g, '\\ ');
 				return `$${cleanRoundBracket}$`;
 			}
 			return match;
@@ -216,8 +216,12 @@
 						{ left: '$$', right: '$$', display: true },
 						{ left: '$', right: '$', display: false },
 						{ left: '\\(', right: '\\)', display: false },
-						{ left: '\\[', right: '\\]', display: true },
-						{ left: '[', right: ']', display: false }
+						{ left: '\\begin{equation}', right: '\\end{equation}', display: true },
+						{ left: '\\begin{align}', right: '\\end{align}', display: true },
+						{ left: '\\begin{alignat}', right: '\\end{alignat}', display: true },
+						{ left: '\\begin{gather}', right: '\\end{gather}', display: true },
+						{ left: '\\begin{CD}', right: '\\end{CD}', display: true },
+						{ left: '\\[', right: '\\]', display: true }
 					],
 					// • rendering keys, e.g.:
 					throwOnError: false
