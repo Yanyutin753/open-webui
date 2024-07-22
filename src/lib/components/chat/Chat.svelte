@@ -98,6 +98,8 @@
 
 	let title = '';
 	let prompt = '';
+
+	let chatFiles = [];
 	let files = [];
 	let messages = [];
 	let history = {
@@ -262,6 +264,8 @@
 			messages: {},
 			currentId: null
 		};
+
+		chatFiles = [];
 		params = {};
 
 		if ($page.url.searchParams.get('models')) {
@@ -333,6 +337,7 @@
 				}
 
 				params = chatContent?.params ?? {};
+				chatFiles = chatContent?.files ?? [];
 
 				autoScroll = true;
 				await tick();
@@ -408,7 +413,8 @@
 					models: selectedModels,
 					messages: messages,
 					history: history,
-					params: params
+					params: params,
+					files: chatFiles
 				});
 				await chats.set(await getChatList(localStorage.token));
 			}
@@ -453,7 +459,8 @@
 					models: selectedModels,
 					messages: messages,
 					history: history,
-					params: params
+					params: params,
+					files: chatFiles
 				});
 				await chats.set(await getChatList(localStorage.token));
 			}
@@ -514,6 +521,13 @@
 			}
 
 			const _files = JSON.parse(JSON.stringify(files));
+			chatFiles.push(..._files.filter((item) => ['doc', 'file', 'collection'].includes(item.type)));
+			chatFiles = chatFiles.filter(
+				// Remove duplicates
+				(item, index, array) =>
+					array.findIndex((i) => JSON.stringify(i) === JSON.stringify(item)) === index
+			);
+
 			files = [];
 
 			prompt = '';
@@ -692,6 +706,7 @@
 		let _response = null;
 
 		const responseMessage = history.messages[responseMessageId];
+		const userMessage = history.messages[responseMessage.parentId];
 
 		// Wait until history/message have been updated
 		await tick();
@@ -754,24 +769,15 @@
 			}
 		});
 
-		let files = [];
+		let files = JSON.parse(JSON.stringify(chatFiles));
 		if (model?.info?.meta?.knowledge ?? false) {
-			files = model.info.meta.knowledge;
+			files.push(...model.info.meta.knowledge);
 		}
-		const lastUserMessage = messages.filter((message) => message.role === 'user').at(-1);
-
-		files = [
-			...files,
-			...(lastUserMessage?.files?.filter((item) =>
-				['doc', 'file', 'collection', 'web_search_results'].includes(item.type)
-			) ?? []),
-			...(responseMessage?.files?.filter((item) =>
-				['doc', 'file', 'collection', 'web_search_results'].includes(item.type)
-			) ?? [])
-		].filter(
-			// Remove duplicates
-			(item, index, array) =>
-				array.findIndex((i) => JSON.stringify(i) === JSON.stringify(item)) === index
+		files.push(
+			...(userMessage?.files ?? []).filter((item) =>
+				['doc', 'file', 'collection'].includes(item.type)
+			),
+			...(responseMessage?.files ?? []).filter((item) => ['web_search_results'].includes(item.type))
 		);
 
 		eventTarget.dispatchEvent(
@@ -936,7 +942,8 @@
 						messages: messages,
 						history: history,
 						models: selectedModels,
-						params: params
+						params: params,
+						files: chatFiles
 					});
 					await chats.set(await getChatList(localStorage.token));
 				}
@@ -1001,25 +1008,19 @@
 
 	const sendPromptOpenAI = async (model, userPrompt, responseMessageId, _chatId) => {
 		let _response = null;
-		const responseMessage = history.messages[responseMessageId];
 
-		let files = [];
+		const responseMessage = history.messages[responseMessageId];
+		const userMessage = history.messages[responseMessage.parentId];
+
+		let files = JSON.parse(JSON.stringify(chatFiles));
 		if (model?.info?.meta?.knowledge ?? false) {
-			files = model.info.meta.knowledge;
+			files.push(...model.info.meta.knowledge);
 		}
-		const lastUserMessage = messages.filter((message) => message.role === 'user').at(-1);
-		files = [
-			...files,
-			...(lastUserMessage?.files?.filter((item) =>
-				['doc', 'file', 'collection', 'web_search_results'].includes(item.type)
-			) ?? []),
-			...(responseMessage?.files?.filter((item) =>
-				['doc', 'file', 'collection', 'web_search_results'].includes(item.type)
-			) ?? [])
-		].filter(
-			// Remove duplicates
-			(item, index, array) =>
-				array.findIndex((i) => JSON.stringify(i) === JSON.stringify(item)) === index
+		files.push(
+			...(userMessage?.files ?? []).filter((item) =>
+				['doc', 'file', 'collection'].includes(item.type)
+			),
+			...(responseMessage?.files ?? []).filter((item) => ['web_search_results'].includes(item.type))
 		);
 
 		scrollToBottom();
@@ -1214,7 +1215,8 @@
 							models: selectedModels,
 							messages: messages,
 							history: history,
-							params: params
+							params: params,
+							files: chatFiles
 						});
 						await chats.set(await getChatList(localStorage.token));
 					}
@@ -1632,6 +1634,7 @@
 				return a;
 			}, [])}
 			bind:show={showControls}
+			bind:chatFiles
 			bind:params
 			bind:valves
 		/>
